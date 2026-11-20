@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
+      FIXTURE_CANARY: ${{ secrets.COPYBARA_FIXTURE_CANARY }}
       GH_TOKEN: ${{ github.token }}
       FIXTURE_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
       FIXTURE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -26,3 +27,20 @@ jobs:
           [[ "$FIXTURE_HEAD_SHA" =~ ^[a-f0-9]{40}$ ]]
           test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = false
           printf 'Fork identity and base repository validated for %s\n' "$FIXTURE_HEAD_SHA"
+      - name: Check fork token and synthetic secret boundaries
+        run: |
+          set -euo pipefail
+          test -z "$FIXTURE_CANARY"
+          export GIT_CONFIG_GLOBAL="$RUNNER_TEMP/fork-fixture-gitconfig"
+          export GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0
+          printf '[credential "https://github.com"]\n    helper = !gh auth git-credential\n' > "$GIT_CONFIG_GLOBAL"
+          probe="$RUNNER_TEMP/fork-fixture.git"
+          git init -q --bare --template='' "$probe"
+          origin="https://github.com/$GITHUB_REPOSITORY.git"
+          git -C "$probe" fetch -q --no-tags "$origin" refs/heads/main
+          if git -C "$probe" push --dry-run "$origin" FETCH_HEAD:refs/heads/synthetic/token-write-probe >"$RUNNER_TEMP/fork-write.txt" 2>&1; then
+            echo 'A read-only fork token unexpectedly passed the write probe'
+            exit 1
+          fi
+          grep -Eqi 'Write access to repository not granted|returned error: 403' "$RUNNER_TEMP/fork-write.txt"
+          echo 'Fork token write denied by GitHub. Synthetic secret unavailable.'
