@@ -1,0 +1,28 @@
+name: Synthetic public fork checks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scope:
+    name: Synthetic fork identity and token scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      FIXTURE_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+      FIXTURE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      FIXTURE_HEAD_REPO_IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+    steps:
+      - name: Verify a real fork supplied the PR head
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = NonEntropyJapan/vericerts-copybara-public-fixture
+          test "$FIXTURE_HEAD_REPO" != "$GITHUB_REPOSITORY"
+          test "$FIXTURE_HEAD_REPO_IS_FORK" = true
+          [[ "$FIXTURE_HEAD_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = false
+          printf 'Fork identity and base repository validated for %s\n' "$FIXTURE_HEAD_SHA"
